@@ -8,12 +8,12 @@
     <main class="main-content">
       <section class="upload-section">
         <div class="upload-box" @dragover.prevent @drop.prevent="handleDrop" @click="triggerFileUpload">
-          <input type="file" id="file-upload" @change="handleFileChange" accept=".srt,.txt" ref="fileInput" style="display: none;">
+          <input type="file" id="file-upload" @change="handleFileChange" accept=".srt" ref="fileInput" style="display: none;">
           
           <div v-if="!File" class="upload-prompt">
             <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="upload-icon"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg> <!-- upload icon -->
             <p>将文本或字幕文件拖拽到此处</p>
-            <small class="file-info">支持 txt , srt 等格式</small>
+            <small class="file-info">支持 srt 格式</small>
           </div>
 
           <div v-if="File" class="file-details">
@@ -27,6 +27,7 @@
       </section>
 
       <section class="display-section">
+        <!-- 源文件预览 -->
         <h3 class="tight-title">源字幕预览 (Original Subtitle Preview)</h3>
         <div class="subtitle-display-container">
           <div class="subtitle-area">
@@ -46,8 +47,11 @@
             </ul>
 
           </div>
+          <button v-if="File" @click="downloadJSON(original_subtitles)" class="process-button" :disabled="downloadJSONoffset">下载原字幕json文件</button>
+
         </div>
 
+        <!-- 翻译字幕预览 -->
         <h3 class="tight-title">翻译字幕预览 (Translated Subtitle Preview)</h3>
         <div class="subtitle-display-container">
           <div class="subtitle-area">
@@ -100,6 +104,7 @@ export default {
     const File = ref(null);
     const isProcessing = ref(false);
     const isTranslated = ref(false);
+    const downloadJSONoffset = ref(false);
     
     // Placeholder for subtitle data
     const original_subtitles = ref([
@@ -122,7 +127,7 @@ export default {
     const handleDrop = (event) => {
       const file = event.dataTransfer.files[0];
       const fileName = file.name.toLowerCase();
-      if (file && (fileName.endsWith('.srt') || fileName.endsWith('.txt'))) {
+      if (file && (fileName.endsWith('.srt'))) {
         File.value = file;
         readSubtitleFile(file); // 👈 添加解析方法
       } else {
@@ -135,11 +140,11 @@ export default {
       if (!file) return;
   
       const fileName = file.name.toLowerCase();
-      if (fileName.endsWith('.srt') || fileName.endsWith('.txt')){
+      if (fileName.endsWith('.srt')){
         File.value = file;
         readSubtitleFile(file); // 👈 添加解析方法
       } else {
-        ElMessage.warning('请选择一个有效的字幕文件（.srt 或 .txt）！');
+        ElMessage.warning('请选择一个有效的字幕文件（.srt）！');
       }
     };
 
@@ -212,6 +217,50 @@ export default {
     /****************************************
     INFO: 处理文件的函数
     ****************************************/
+    // const startProcessing = () => {
+    //   if (!File.value) {
+    //     ElMessage.warning('请先选择一个文件！');
+    //     return;
+    //   }
+    //   isProcessing.value = true;
+    //   console.log('开始处理文件:', File.value.name);
+
+    //   // 获取用户IP和时间戳并生成字段名
+    //   getUserIP().then(ip => {
+    //     const now = new Date();
+    //     const timestamp = now.toLocaleString('sv').replace(' ', '-').replace(/:/g, '');
+    //     const fieldName = `subtitle_${ip}_${timestamp}`;
+    //     console.log('字段名:', fieldName);
+    //     const formData = new FormData();
+    //     formData.append(fieldName, File); // 👈 动态字段名
+    //     fetch('http://localhost:8080/upload-subtitle', {
+    //         method: 'POST',
+    //         body: formData
+    //     });
+    //     // 等待与后端的链接
+    //   });
+
+    //   // --- API Integration Placeholder ---
+    //   // 1. Upload file to server
+    //   // 2. Poll for processing status
+    //   // 3. On success, fetch subtitle data
+    //   // ------------------------------------
+
+    //   // Simulate API call and receiving data
+    //   setTimeout(() => {
+    //     translated_subtitles.value = [
+    //       { timestamp: '00:00:01,234 --> 00:00:03,456', original: '你好！', translated: 'Hello!' },
+    //       { timestamp: '00:00:04,000 --> 00:00:06,789', original: '今天天气真好。', translated: 'The weather is great today.' },
+    //       { timestamp: '00:00:07,100 --> 00:00:09,500', original: '我们去公园吧。', translated: "Let's go to the park." },
+    //       { timestamp: '00:00:10,000 --> 00:00:12,000', original: '再见！', translated: 'Goodbye!' },
+    //       { timestamp: '00:00:13,000 --> 00:00:15,000', original: '谢谢！', translated: 'Thanks!' },
+    //     ];
+    //     isProcessing.value = false;
+    //     isTranslated.value = true;
+    //     ElMessage.success('处理完成');
+    //   }, 3000); // Simulate a 3-second processing time
+    // };
+
     const startProcessing = () => {
       if (!File.value) {
         ElMessage.warning('请先选择一个文件！');
@@ -219,50 +268,94 @@ export default {
       }
       isProcessing.value = true;
       console.log('开始处理文件:', File.value.name);
+      handleResponse(); // 👈 交给模块化函数处理
+    };
 
-      // 获取用户IP和时间戳并生成字段名
-      getUserIP().then(ip => {
-        const now = new Date();
-        const timestamp = now.toLocaleString('sv').replace(' ', '-').replace(/:/g, '');
-        const fieldName = `subtitle_${ip}_${timestamp}`;
-        console.log('字段名:', fieldName);
-        const formData = new FormData();
-        formData.append(fieldName, File); // 👈 动态字段名
-        fetch('http://localhost:8080/upload-subtitle', {
-          method: 'POST',
-          body: formData
-        });
-        // 等待与后端的链接
-      });
+    const handleResponse = async () => {
+      try {
+        const fieldName = await generateFieldName();
+        const uploadRes = await uploadFile(fieldName, File.value);
 
-      // --- API Integration Placeholder ---
-      // 1. Upload file to server
-      // 2. Poll for processing status
-      // 3. On success, fetch subtitle data
-      // ------------------------------------
+        if (!uploadRes.ok) {
+          ElMessage.error('上传失败，请重试');
+          isProcessing.value = false;
+          return;
+        }
 
-      // Simulate API call and receiving data
-      setTimeout(() => {
-        translated_subtitles.value = [
-          { timestamp: '00:00:01,234 --> 00:00:03,456', original: '你好！', translated: 'Hello!' },
-          { timestamp: '00:00:04,000 --> 00:00:06,789', original: '今天天气真好。', translated: 'The weather is great today.' },
-          { timestamp: '00:00:07,100 --> 00:00:09,500', original: '我们去公园吧。', translated: "Let's go to the park." },
-          { timestamp: '00:00:10,000 --> 00:00:12,000', original: '再见！', translated: 'Goodbye!' },
-          { timestamp: '00:00:13,000 --> 00:00:15,000', original: '谢谢！', translated: 'Thanks!' },
-        ];
-        isProcessing.value = false;
+        // 等待后端处理完成（可以用轮询或 WebSocket）
+        const result = await pollForResult(); // 👈 真实获取后端返回数据
+        translated_subtitles.value = result.subtitles;
         isTranslated.value = true;
         ElMessage.success('处理完成');
-      }, 3000); // Simulate a 3-second processing time
+      } catch (err) {
+        ElMessage.error(`处理失败: ${err.message}`);
+      } finally {
+        isProcessing.value = false;
+      }
     };
+
+    const generateFieldName = async () => {
+      const ip = await getUserIP();
+      const timestamp = new Date().toLocaleString('sv').replace(' ', '-').replace(/:/g, '');
+      return `subtitle_${ip}_${timestamp}`;
+    };
+
+    const uploadFile = async (fieldName, file) => {
+      const formData = new FormData();
+      formData.append(fieldName, file);
+      // return fetch('http://localhost:8080/upload-subtitle', {
+      //   method: 'POST',
+      //   body: formData
+      // });
+      return {
+        ok:true, // 模拟成功响应
+      }
+    };
+
+    const pollForResult = async () => {
+      // 假设后端提供轮询接口
+      return {
+    subtitles: [
+      {
+        timestamp: '00:00:01,234 --> 00:00:03,456',
+        original: '你好！',
+        translated: 'Hello!'
+      },
+      {
+        timestamp: '00:00:04,000 --> 00:00:06,789',
+        original: '今天天气真好。',
+        translated: 'The weather is great today.'
+      },
+      {
+        timestamp: '00:00:07,100 --> 00:00:09,500',
+        original: '我们去公园吧。',
+        translated: "Let's go to the park."
+      },
+      {
+        timestamp: '00:00:10,000 --> 00:00:12,000',
+        original: '再见！',
+        translated: 'Goodbye!'
+      },
+      {
+        timestamp: '00:00:13,000 --> 00:00:15,000',
+        original: '谢谢！',
+        translated: 'Thanks!'
+      }
+    ]
+  };
+      // const response = await fetch('http://localhost:8080/subtitle-result');
+      // if (!response.ok) throw new Error('后端处理失败');
+      // return response.json(); // 返回字幕数据
+    };
+
+
+    /****************************************
+    INFO: 转换为SRT格式的函数
+    ****************************************/
 
     const convertToSRT = (subtitlesArray) => {
       return subtitlesArray.map((item, index) => {
-        return `${index + 1}
-${item.timestamp}
-${item.original}
-${item.translated}
-` // 此处前面不应该有空行
+        return `${index + 1}\n${item.timestamp}\n${item.original}\n${item.translated}\n\n`
       }).join('')
     };
 
@@ -289,6 +382,27 @@ ${item.translated}
       URL.revokeObjectURL(url)
     };
 
+    const downloadJSON = (data) => {
+      if (!data || data.length === 0) {
+        ElMessage.error('没有数据可下载');
+        return;
+      }
+      downloadJSONoffset.value = true; // 设置下载状态为 true
+
+      const jsonContent = JSON.stringify(data, null, 2);
+      const blob = new Blob([jsonContent], { type: 'application/json;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const filename = `subtitles-${new Date().toISOString().replace(/[:.]/g, '-')}-as-json.json`; // 使用 ISO 格式的时间戳作为文件名
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      setTimeout(() => {
+        downloadJSONoffset.value = false; // 下载完成后重置状态
+      }, 1000); // 1秒后重置状态
+      URL.revokeObjectURL(url);
+    };
+
     return {
       fileInput,
       File,
@@ -296,13 +410,20 @@ ${item.translated}
       original_subtitles,
       translated_subtitles,
       isTranslated,
+      downloadJSONoffset,
       triggerFileUpload,
       handleFileChange,
       readSubtitleFile,
       handleDrop,
       startProcessing,
+      parseSRT,
+      handleResponse,
+      generateFieldName,
+      uploadFile,
+      pollForResult,
       convertToSRT,
       downloadSRT,
+      downloadJSON,
     };
     // 这表示：你希望这些变量和方法可以在 <template> 中被访问和使用。
     // 实际上你使用script setup 时，所有在 setup 函数中定义的变量和方法都会自动暴露到模板中。
@@ -313,7 +434,7 @@ ${item.translated}
 <style>
 /* Title */
 .tight-title {
-  margin: 10px 0;
+  margin: 0px 0;
   line-height: 1;
 }
 
