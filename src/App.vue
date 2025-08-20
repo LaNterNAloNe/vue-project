@@ -81,6 +81,18 @@
 import { ElMessage } from 'element-plus';
 import { ref } from 'vue';
 
+async function getUserIP() {
+  try {
+    const res = await fetch('https://api.ipify.org?format=json');
+    const data = await res.json();
+    console.log('用户 IP:', data.ip);
+    return data.ip;
+  } catch (error) {
+    console.error('获取 IP 失败:', error);
+    return null;
+  }
+}
+
 export default {
   name: 'App',
   setup() {
@@ -135,12 +147,12 @@ export default {
     INFO: 解析字幕文件的函数
     ****************************************/
     const readSubtitleFile = (file) => {
-        const reader = new FileReader();
-        reader.onload = () => {
-            const content = reader.result;
-            original_subtitles.value = parseSRT(content); // 👈 解析为结构化数据
-        };
-        reader.readAsText(file);
+      const reader = new FileReader();
+      reader.onload = () => {
+          const content = reader.result;
+          original_subtitles.value = parseSRT(content); // 👈 解析为结构化数据
+      };
+      reader.readAsText(file);
     };
 
     const parseSRT = (text) => {
@@ -207,7 +219,22 @@ export default {
       }
       isProcessing.value = true;
       console.log('开始处理文件:', File.value.name);
-      
+
+      // 获取用户IP和时间戳并生成字段名
+      getUserIP().then(ip => {
+        const now = new Date();
+        const timestamp = now.toLocaleString('sv').replace(' ', '-').replace(/:/g, '');
+        const fieldName = `subtitle_${ip}_${timestamp}`;
+        console.log('字段名:', fieldName);
+        const formData = new FormData();
+        formData.append(fieldName, File); // 👈 动态字段名
+        fetch('http://localhost:8080/upload-subtitle', {
+          method: 'POST',
+          body: formData
+        });
+        // 等待与后端的链接
+      });
+
       // --- API Integration Placeholder ---
       // 1. Upload file to server
       // 2. Poll for processing status
@@ -230,27 +257,37 @@ export default {
     };
 
     const convertToSRT = (subtitlesArray) => {
-    return subtitlesArray.map((item, index) => {
+      return subtitlesArray.map((item, index) => {
         return `${index + 1}
 ${item.timestamp}
 ${item.original}
 ${item.translated}
 ` // 此处前面不应该有空行
-    }).join('')
-    }
+      }).join('')
+    };
 
     const downloadSRT = () => {
-    const srtContent = convertToSRT(translated_subtitles.value)
-    const blob = new Blob([srtContent], { type: 'text/plain;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
+      const srtContent = convertToSRT(translated_subtitles.value)
+      const blob = new Blob([srtContent], { type: 'text/plain;charset=plaintext' })
+      const url = URL.createObjectURL(blob)
 
-    const a = document.createElement('a')
-    a.href = url
-    a.download = 'subtitles.srt'
-    a.click()
+      // 获取文件名称
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = String(now.getMonth() + 1).padStart(2, '0'); // 月份从 0 开始
+      const day = String(now.getDate()).padStart(2, '0');
+      const hour = String(now.getHours()).padStart(2, '0');
+      const minute = String(now.getMinutes()).padStart(2, '0');
+      const second = String(now.getSeconds()).padStart(2, '0');
+      const downloadFileName = `subtitles-${year}${month}${day}-${hour}${minute}${second}.srt`;
 
-    URL.revokeObjectURL(url)
-    }
+      const a = document.createElement('a')
+      a.href = url
+      a.download = downloadFileName;
+      a.click()
+
+      URL.revokeObjectURL(url)
+    };
 
     return {
       fileInput,
