@@ -8,20 +8,22 @@
     <main class="main-content">
       <section class="upload-section">
         <div class="upload-box" @dragover.prevent @drop.prevent="handleDrop" @click="triggerFileUpload">
-          <input type="file" id="file-upload" @change="handleFileChange" accept=".srt" ref="fileInput" style="display: none;">
+          <input type="file" id="file-upload" @change="handleFileChange" accept=".srt,.json" ref="fileInput" style="display: none;">
           
           <div v-if="!File" class="upload-prompt">
             <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="upload-icon"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg> <!-- upload icon -->
             <p>将文本或字幕文件拖拽到此处</p>
-            <small class="file-info">支持 srt 格式</small>
+            <small class="file-info">支持 json srt 格式</small>
           </div>
 
           <div v-if="File" class="file-details">
             <h4>已选择文件:</h4>
             <p>{{ File.name }}</p>
-            <button @click.stop="startProcessing" class="process-button" :disabled="isProcessing">
+            <button @click.stop="startProcessing" class="process-button-green" :disabled="isProcessing">
               {{ isProcessing ? '处理中...' : '开始翻译' }}
             </button>
+            <br>
+            <button @click.stop="clearFile" class="process-button-red" :disabled="isProcessing">清除文件</button>
           </div>
         </div>
       </section>
@@ -47,7 +49,7 @@
             </ul>
 
           </div>
-          <button v-if="File" @click="downloadJSON(original_subtitles)" class="process-button" :disabled="downloadJSONoffset">下载原字幕json文件</button>
+          <button v-if="File" @click="downloadJSON(original_subtitles)" class="process-button-green" :disabled="downloadJSONoffset">下载原字幕json文件</button>
 
         </div>
 
@@ -56,7 +58,7 @@
         <div class="subtitle-display-container">
           <div class="subtitle-area">
 
-            <div v-if="!isTranslated" class="subtitle-placeholder"> 
+            <div v-if="!isTranslated && translated_subtitles.length === 0" class="subtitle-placeholder"> 
             <!-- 此处应判断是否完成翻译（翻译结果包含无文本【特殊情况】） -->
               <p>翻译生成的字幕将在此显示...</p>
             </div>
@@ -74,7 +76,8 @@
             </ul>
 
           </div>
-          <button v-if="isTranslated" @click="downloadSRT(translated_subtitles)" class="process-button">下载字幕文件</button>
+          <button v-if="isTranslated || translated_subtitles.length > 0" @click="downloadSRT(translated_subtitles)" class="process-button-green">下载字幕文件</button>
+
         </div>
       </section>
     </main>
@@ -83,7 +86,8 @@
 
 <script>
 import { ElMessage } from 'element-plus';
-import { ref } from 'vue';
+import { ref, onMounted, onBeforeUnmount } from 'vue';
+
 
 async function getUserIP() {
   try {
@@ -114,11 +118,10 @@ export default {
     const translated_subtitles = ref([
       // Example data structure
       // { timestamp: '00:00:01,234 --> 00:00:03,456', original: '你好！', translated: 'Hello!' },
-      // { timestamp: '00:00:04,000 --> 00:00:06,789', original: '今天天气真好。', translated: 'The weather is great today.' }
     ]);
 
     /****************************************
-    INFO: 触发文件上传的函数
+    INFO: 触发操作文件的函数
     ****************************************/
     const triggerFileUpload = () => {
       fileInput.value.click();
@@ -142,10 +145,21 @@ export default {
       const fileName = file.name.toLowerCase();
       if (fileName.endsWith('.srt')){
         File.value = file;
+        ElMessage.success('srt 字幕文件已成功加载');
         readSubtitleFile(file); // 👈 添加解析方法
+      } else if (fileName.endsWith('.json')) {
+        File.value = file;
+        handleJSONUpload(file); // 👈 处理 JSON 文件
       } else {
-        ElMessage.warning('请选择一个有效的字幕文件（.srt）！');
+        ElMessage.warning('请选择一个有效的字幕文件（.srt, .json）！');
       }
+    };
+
+    const clearFile = () => {
+      File.value = null;
+      original_subtitles.value = [];
+      isTranslated.value = false;
+      downloadJSONoffset.value = false;
     };
 
     /****************************************
@@ -214,53 +228,35 @@ export default {
       return subtitles;
     };
 
+    const handleJSONUpload = (file) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const jsonData = JSON.parse(reader.result);
+
+          /*
+          JSON 文件结构为 
+          { results: [...] 
+            // results 数组中每个元素结构同 parseSRT 解析后的对象
+          }
+          */
+          if (Array.isArray(jsonData.results)) {
+            original_subtitles.value = jsonData.results;
+            ElMessage.success('字幕 JSON 文件已成功加载');
+          } else {
+            ElMessage.error('JSON 文件格式不正确');
+          }
+        } catch (error) {
+          console.error('解析 JSON 失败:', error);
+          ElMessage.error('无法解析 JSON 文件');
+        }
+      };
+      reader.readAsText(file);
+    };
+
     /****************************************
     INFO: 处理文件的函数
     ****************************************/
-    // const startProcessing = () => {
-    //   if (!File.value) {
-    //     ElMessage.warning('请先选择一个文件！');
-    //     return;
-    //   }
-    //   isProcessing.value = true;
-    //   console.log('开始处理文件:', File.value.name);
-
-    //   // 获取用户IP和时间戳并生成字段名
-    //   getUserIP().then(ip => {
-    //     const now = new Date();
-    //     const timestamp = now.toLocaleString('sv').replace(' ', '-').replace(/:/g, '');
-    //     const fieldName = `subtitle_${ip}_${timestamp}`;
-    //     console.log('字段名:', fieldName);
-    //     const formData = new FormData();
-    //     formData.append(fieldName, File); // 👈 动态字段名
-    //     fetch('http://localhost:8080/upload-subtitle', {
-    //         method: 'POST',
-    //         body: formData
-    //     });
-    //     // 等待与后端的链接
-    //   });
-
-    //   // --- API Integration Placeholder ---
-    //   // 1. Upload file to server
-    //   // 2. Poll for processing status
-    //   // 3. On success, fetch subtitle data
-    //   // ------------------------------------
-
-    //   // Simulate API call and receiving data
-    //   setTimeout(() => {
-    //     translated_subtitles.value = [
-    //       { timestamp: '00:00:01,234 --> 00:00:03,456', original: '你好！', translated: 'Hello!' },
-    //       { timestamp: '00:00:04,000 --> 00:00:06,789', original: '今天天气真好。', translated: 'The weather is great today.' },
-    //       { timestamp: '00:00:07,100 --> 00:00:09,500', original: '我们去公园吧。', translated: "Let's go to the park." },
-    //       { timestamp: '00:00:10,000 --> 00:00:12,000', original: '再见！', translated: 'Goodbye!' },
-    //       { timestamp: '00:00:13,000 --> 00:00:15,000', original: '谢谢！', translated: 'Thanks!' },
-    //     ];
-    //     isProcessing.value = false;
-    //     isTranslated.value = true;
-    //     ElMessage.success('处理完成');
-    //   }, 3000); // Simulate a 3-second processing time
-    // };
-
     const startProcessing = () => {
       if (!File.value) {
         ElMessage.warning('请先选择一个文件！');
@@ -389,7 +385,17 @@ export default {
       }
       downloadJSONoffset.value = true; // 设置下载状态为 true
 
-      const jsonContent = JSON.stringify(data, null, 2);
+      let index = 0;
+      const cleanedData = data.map(item => {
+        return {
+          index: ++index,
+          timestamp: item.timestamp,
+          original: item.original,
+          translated: item.translated || ''
+        };
+      });
+      const wrappedData = { results: cleanedData }; // 包装数据为 { results: [...] }
+      const jsonContent = JSON.stringify(wrappedData, null, 2);
       const blob = new Blob([jsonContent], { type: 'application/json;charset=utf-8' });
       const url = URL.createObjectURL(blob);
       const filename = `subtitles-${new Date().toISOString().replace(/[:.]/g, '-')}-as-json.json`; // 使用 ISO 格式的时间戳作为文件名
@@ -403,6 +409,24 @@ export default {
       URL.revokeObjectURL(url);
     };
 
+    /****************************************
+    INFO: 页面关闭前的确认提示
+    ****************************************/
+    onMounted(() => {
+      window.addEventListener('beforeunload', handleBeforeUnload);
+    });
+
+    onBeforeUnmount(() => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    });
+
+    const handleBeforeUnload = (event) => {
+      if (isTranslated.value || translated_subtitles.value.length > 0) {
+        event.preventDefault();
+        event.returnValue = ''; // 某些浏览器需要设置这个才能触发提示
+      }
+    };
+
     return {
       fileInput,
       File,
@@ -413,6 +437,7 @@ export default {
       downloadJSONoffset,
       triggerFileUpload,
       handleFileChange,
+      clearFile,
       readSubtitleFile,
       handleDrop,
       startProcessing,
@@ -424,6 +449,7 @@ export default {
       convertToSRT,
       downloadSRT,
       downloadJSON,
+      handleBeforeUnload,
     };
     // 这表示：你希望这些变量和方法可以在 <template> 中被访问和使用。
     // 实际上你使用script setup 时，所有在 setup 函数中定义的变量和方法都会自动暴露到模板中。
@@ -446,6 +472,7 @@ export default {
   --text-color: #333;
   --border-color: #dbe2e8;
   --card-bg-color: #ffffff;
+  --forbidden-color: #ff4958;
   --font-family: 'Helvetica Neue', Arial, sans-serif;
 }
 
@@ -455,6 +482,7 @@ body {
   color: var(--text-color);
   margin: 0;
   padding: 0;
+  overflow-x: hidden;
 }
 
 #app-container {
@@ -488,6 +516,7 @@ body {
   display: flex;
   gap: 2rem;
   flex-wrap: stretch;
+  animation: fadeIn 1s ease;
 }
 
 .upload-section, .display-section {
@@ -499,16 +528,22 @@ body {
 
 .upload-section {
   flex: 1;
-  min-width: 350px;
+  min-width: 20%;
+  max-width: 40%;
   flex-direction: column;
+  animation: slideInX-left 1s ease;
+  overflow: hidden;
 }
 
 .display-section {
   flex: 2;
-  min-width: 600px;
+  min-width: 40%;
+  max-width: 80%;
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
+  animation: slideInX-right 1s ease;
+  overflow: hidden;
 }
 
 /* Upload Box */
@@ -563,7 +598,7 @@ body {
     border-radius: 5px;
 }
 
-.process-button {
+.process-button-green {
     background-color: var(--secondary-color);
     color: white;
     border: none;
@@ -576,31 +611,27 @@ body {
     margin-top: 1rem;
 }
 
-.process-button:disabled {
+.process-button-green:disabled {
     background-color: #ccc;
     cursor: not-allowed;
 }
 
+.process-button-red {
+    background-color: var(--forbidden-color);
+    color: white;
+    border: none;
+    padding: 0.8rem 2rem;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 1rem;
+    font-weight: 500;
+    transition: background-color 0.3s ease;
+    margin-top: 1rem;
+}
+
 /* Display Section */
-.video-player-container, .subtitle-display-container {
+.subtitle-display-container {
   width: 100%;
-}
-
-.video-player {
-  width: 100%;
-  border-radius: 8px;
-  background-color: #000;
-}
-
-.video-placeholder {
-  width: 100%;
-  height: 350px;
-  background-color: #e9ecef;
-  border-radius: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #6c757d;
 }
 
 .subtitle-area {
@@ -630,9 +661,10 @@ body {
   margin-bottom: 1.2rem;
   padding-bottom: 1rem;
   border-bottom: 1px solid #e0e0e0;
+  animation: slideInY-bottom-slight 1s ease;
 }
 .subtitle-item:last-child {
-    border-bottom: none;
+  border-bottom: none;
 }
 
 .timestamp {
@@ -654,6 +686,74 @@ body {
   color: var(--primary-color);
   font-weight: 500;
   margin: 0;
+}
+
+@keyframes fadeIn {
+  0% { transform: scale(0.8);
+       opacity: 0; 
+       filter: blur(5px); }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+@keyframes slideInX-left {
+  0% { transform: translateX(-100%);
+       opacity: 0; }
+  100% { transform: translateX(0); opacity: 1; }
+}
+
+@keyframes slideInX-right {
+  0% { transform: translateX(100%);
+       opacity: 0; }
+  100% { transform: translateX(0); opacity: 1; }
+}
+
+@keyframes slideInY-top-slight {
+  0% { transform: translateY(-50px);
+       opacity: 0; }
+  100% { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes slideInY-bottom-slight {
+  0% { transform: translateY(50px);
+       opacity: 0; }
+  100% { transform: translateY(0); opacity: 1; }
+}
+
+@media (max-aspect-ratio: 1/1) {
+  #app-container {
+    padding: 1rem;
+  }
+
+  .main-content {
+    flex-direction: column;
+    gap: 1rem;
+    max-width: none; /* 确保没有限制最大宽度 */
+  }
+
+  .upload-section,
+  .display-section {
+    max-width: 600px;
+    margin: 0 auto;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 1rem;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    animation: none;
+  }
+
+  .app-header h1 {
+    font-size: 1.8rem;
+  }
+
+  .app-header .subtitle {
+    font-size: 0.9rem;
+  }
+
+  .subtitle-area {
+    height: auto;
+    max-height: 250px;
+  }
 }
 
 </style>
